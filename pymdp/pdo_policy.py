@@ -1,9 +1,5 @@
 
-import warnings
 import numpy as np
-from pymdp import inference, control, learning
-from pymdp import utils, maths
-import copy
 import jax.numpy as jnp
 import jax
 
@@ -74,6 +70,10 @@ class TabularPolicy(PDOPolicyBase):
         if obs not in self.observation_seq_index:
             raise ValueError(f"Observation sequence {obs} not in table")
         return self.table[self.observation_seq_index[obs]]
+    
+    def updated_copy(self, new_table: np.ndarray | jnp.ndarray) -> "TabularPolicy":
+        return TabularPolicy(action_counts=self.action_counts, action_names=self.action_names,
+                             observation_sequences=self.observation_sequences, table=new_table)
 
 ## Register TabularPolicy with Jax tree_util to be passed as a parameter
 jax.tree_util.register_pytree_node(
