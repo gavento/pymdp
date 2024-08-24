@@ -23,8 +23,8 @@ class PDOPolicyBase:
             self.action_counts = action_counts
             self.action_names = [
                 [f"A{n}-{i}" for i in range(n)] for n in action_counts]
-        assert action_counts == [
-            len(a) for a in action_names], "action_counts must match action_names"
+        assert self.action_counts == [
+            len(a) for a in self.action_names], "action_counts must match action_names"
 
     def policy_for_observations(self, observations: ObservationSequence) -> Policy:
         """Given a series of observations, returns a JOINT distribution over actions, probabilities of shape self.action_counts"""
@@ -63,7 +63,7 @@ class TabularPolicy(PDOPolicyBase):
         self.table = table
         if self.table is None:
             self.table = jnp.ones(
-                shape=(len(self.observation_sequences), *self.action_counts), dtype=np.float64) / self.n_actions
+                shape=(len(self.observation_sequences), *self.action_counts), dtype=jnp.float32) / self.n_actions
 
     def policy_for_observations(self, observation_sequence: ObservationSequence) -> Policy:
         obs = tuple(tuple(observation) for observation in observation_sequence)
@@ -78,6 +78,6 @@ class TabularPolicy(PDOPolicyBase):
 ## Register TabularPolicy with Jax tree_util to be passed as a parameter
 jax.tree_util.register_pytree_node(
     TabularPolicy,
-    lambda p: ((p.action_counts, p.action_names, p.observation_sequences), p.table),
-    lambda x, y: TabularPolicy(*x, table=y)
+    lambda p: ((p.table,), (p.action_counts, p.action_names, p.observation_sequences)),
+    lambda x, y: TabularPolicy(action_counts=x[0], action_names=x[1], observation_sequences=x[2], table=y[0])
 )
