@@ -70,7 +70,7 @@ class BranchingAgent(Agent):
             return policy.updated_copy(pol_table)
         
         logging.info(f"Running policy iteration:\n{0:03d}/{self.policy_iterations:03d}: G = {self.G(self.policy):.3f}")
-        for i in (bar := tqdm.trange(self.policy_iterations, disable=not self.progress)):
+        for i in (bar := tqdm.trange(self.policy_iterations, disable=not self.progress, leave=True)):
             self.policy = step_fn(self.policy)
             bar.set_postfix(G=self.G(self.policy))
 
