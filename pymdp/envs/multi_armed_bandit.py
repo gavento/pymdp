@@ -19,7 +19,7 @@ class MultiArmedBanditEnv(Env):
         
         self.num_states = [self.n + 1] # locations
         self.num_locations = self.num_states[0]
-        self.num_controls = self.n # Only non-inital locations
+        self.num_controls = [self.n] # Only non-inital locations
         self.num_obs = [self.n + 1, self.n + 1] # locations, rewards
         self.num_factors = len(self.num_states) # One factor for locations
         self.num_modalities = len(self.num_obs) # Two modalities: locations, rewards
@@ -60,7 +60,7 @@ class MultiArmedBanditEnv(Env):
         return self._transition_dist
 
     def _construct_transition_dist(self):
-        B = utils.obj_array_zeros([self.num_states + self.num_states + [self.num_controls]])
+        B = utils.obj_array_zeros([self.num_states + self.num_states + self.num_controls])
         for i in range(self.n):
             B[0][i,:,i] = 1.0
         return B
