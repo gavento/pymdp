@@ -25,7 +25,8 @@ class BranchingAgent(Agent):
     The agent only runs inference on the first time it is called, then just follows the policy it inferred.
     """
 
-    def __init__(self, A, B, time_horizon, env: Env, policy_iterations: int, policy_lr=0.01, progress=True, **kwargs):
+    def __init__(self, A, B, time_horizon, env: Env, policy_iterations: int, policy_lr=0.01,
+                 prior_policy: PDOPolicyBase=None, beta=1.0, progress=True, **kwargs):
         super(BranchingAgent, self).__init__(A, B, **kwargs)
         self.policy = None
         self.action = None
@@ -35,6 +36,8 @@ class BranchingAgent(Agent):
         self.prior_policy = UniformPDOPolicy(action_counts=self.num_controls)
         self.env = env
         self.progress = progress
+        self.prior_policy = prior_policy
+        self.beta = beta
 
         # Possible observations for each turn:
         self.possible_observations = tuple(itertools.product(*[range(onum) for onum in self.num_obs]))
@@ -141,7 +144,46 @@ class PDOAgent(BranchingAgent):
 
     def G(self, policy: PDOPolicyBase):
         "This needs to be JAX-differentiable wrt values from `policy.table`"
-        return 0.0
+        B_agg = self.compute_B_agg(with_jax=True)
+        uniform_policy = policy.uniform_policy()
+
+        def _helper(observations: tuple[tuple[int]], state_prob: jnp.ndarray) -> jnp.ndarray:
+            if len(observations) > self.time_horizon:
+                return 0.0
+
+            FE = jnp.array(0.0)
+            for o in self.possible_observations:
+                 # This can be just NP product - does not depend on policy
+                evidence = np.prod([Af[o[i]] for i, Af in enumerate(self.A)], axis=0)
+
+                sb2 = jnp.array(state_prob) * evidence
+                for i in range(self.num_modalities):
+                    FE -= self.C[i][o[i]] * jnp.sum(sb2)
+
+                obs2 = observations + (o,)
+                if obs2 not in policy.observation_seq_index:
+                    continue
+                po2 = policy.policy_for_observations(obs2)
+            
+                # Prior policy
+                if self.prior_policy is None or obs2 not in self.prior_policy.observation_seq_index:
+                    ppo2 = uniform_policy
+                else:
+                    ppo2 = self.prior_policy.policy_for_observations(obs2)
+                ppo2 = jnp.array(ppo2)
+
+                # Add penalty for KL divergence between po2 and ppo2
+                FE += (1 / self.beta) * jnp.sum(sb2) * jnp.sum(po2 * (jnp.log2(po2 + 1e-10) - jnp.log2(ppo2 + 1e-10)))
+
+                # Apply policy actions to B_agg
+                B_agg3 = jnp.tensordot(B_agg, po2, axes=self.num_factors)
+                # Apply previous state belief to B3
+                sb4 = jnp.tensordot(B_agg3, sb2, axes=self.num_factors)
+                FE += _helper(obs2, sb4)
+
+            return FE
+
+        return _helper((), outer_product(*self.D))
 
 
 class EVAgent(BranchingAgent):
@@ -154,14 +196,14 @@ class EVAgent(BranchingAgent):
             if len(observations) > self.time_horizon:
                 return 0.0
 
-            ret = jnp.array(0.0)
+            FE = jnp.array(0.0)
             for o in self.possible_observations:
                  # This can be just NP product - does not depend on policy
                 evidence = np.prod([Af[o[i]] for i, Af in enumerate(self.A)], axis=0)
 
                 sb2 = jnp.array(state_prob) * evidence
                 for i in range(self.num_modalities):
-                    ret += self.C[i][o[i]] * jnp.sum(sb2)
+                    FE -= self.C[i][o[i]] * jnp.sum(sb2)
 
                 obs2 = observations + (o,)
                 if obs2 not in policy.observation_seq_index:
@@ -172,11 +214,11 @@ class EVAgent(BranchingAgent):
                 B_agg3 = jnp.tensordot(B_agg, po2, axes=self.num_factors)
                 # Apply previous state belief to B3
                 sb4 = jnp.tensordot(B_agg3, sb2, axes=self.num_factors)
-                ret += _helper(obs2, sb4)
+                FE += _helper(obs2, sb4)
 
-            return ret
+            return FE
 
-        return -_helper((), outer_product(*self.D))
+        return _helper((), outer_product(*self.D))
 
 
 def outer_product(*arrays):
