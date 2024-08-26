@@ -44,10 +44,15 @@ class BranchingAgent(Agent):
         # A has shape: (tgt_observation_dim[i] + src_state_dims) for i in range(num_modalities)
         # B has shape: (tgt_state_dim[i] + src_state_dims + action_dim[i]) for i in range(num_factors)
 
-        B_agg = outer_product(*self.B)
-        B_agg_d = len(B_agg.shape)
-        self.B_agg = np.array(B_agg.transpose(tuple(range(0, B_agg_d, 3)) + tuple(range(1, B_agg_d, 3)) + tuple(range(2, B_agg_d, 3))))
+        B_agg = self.compute_B_agg()
         # The shape of B_agg is: (tgt_state_dims + src_state_dims + action_dims)
+
+    def compute_B_agg(self, with_jax=False):
+        """The shape of B_agg is: (tgt_state_dims + src_state_dims + action_dims)"""
+        B = [jnp.array(b) for b in self.B] if with_jax else self.B
+        B_agg = outer_product(*B)
+        B_agg_d = len(B_agg.shape)
+        return B_agg.transpose(tuple(range(0, B_agg_d, 3)) + tuple(range(1, B_agg_d, 3)) + tuple(range(2, B_agg_d, 3)))
 
     def infer_policies(self):
         if self.policy is not None:
@@ -143,6 +148,7 @@ class EVAgent(BranchingAgent):
     """Agent minimizing expected value of the reward (sum over all the timesteps)"""
 
     def G(self, policy: PDOPolicyBase):
+        B_agg = self.compute_B_agg(with_jax=True)
 
         def _helper(observations: tuple[tuple[int]], state_prob: jnp.ndarray) -> jnp.ndarray:
             if len(observations) > self.time_horizon:
@@ -163,7 +169,7 @@ class EVAgent(BranchingAgent):
                 po2 = policy.policy_for_observations(obs2)
             
                 # Apply policy actions to B_agg
-                B_agg3 = jnp.tensordot(self.B_agg, po2, axes=self.num_factors)
+                B_agg3 = jnp.tensordot(B_agg, po2, axes=self.num_factors)
                 # Apply previous state belief to B3
                 sb4 = jnp.tensordot(B_agg3, sb2, axes=self.num_factors)
                 ret += _helper(obs2, sb4)
@@ -174,9 +180,9 @@ class EVAgent(BranchingAgent):
 
 
 def outer_product(*arrays):
-    if isinstance(arrays[0], jnp.ndarray):
+    if isinstance(arrays[0], jax.Array):
         return functools.reduce(lambda x,y: jnp.tensordot(x, y, axes=([], [])), arrays)
     elif isinstance(arrays[0], np.ndarray):
         return functools.reduce(lambda x,y: np.tensordot(x, y, axes=([], [])), arrays)
     else:
-        raise ValueError("Arrays must be either jnp.ndarray or np.ndarray")
+        raise ValueError(f"Arrays must be either jnp.ndarray or np.ndarray, got {type(arrays[0])}")
