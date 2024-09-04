@@ -7,18 +7,22 @@ __author__: Tomáš Gavenčiak
 
 """
 
+import copy
 import numpy as np
 import jax.numpy as jnp
 
-from .common import ActionSequence, ObservationSequence, PolicyStats, PolicyDict, outer_product, sum_dicts
+from .common import Action, ActionDistribution, ActionSequence, ObservationSequence, PolicyStats, PolicyDict, outer_product, sum_dicts
 from .agent_base import BranchingAgent
 from .full_policy import TabularPolicy
 
 
-class EVAgentDirect(BranchingAgent):
+class AgentDirectBase(BranchingAgent):
     """Agent minimizing expected value of the reward (sum over all the timesteps)
 
     Note that this assumes that the actions the agent took are implied by the observations!"""
+
+    DEFAULT_STATS = {"G": 0.0, "nodes": 0}
+    STAT_SUM_KEYS = ["nodes"]
 
     def optimal_policy(self) -> tuple[PolicyDict, PolicyStats]:
         policy, stats = self._optimal_policy_rec(
@@ -26,11 +30,14 @@ class EVAgentDirect(BranchingAgent):
         self.stats = stats
         return TabularPolicy.from_dict(policy)
 
+    def _stats_update_on_observation(self, state_probs: np.ndarray, observations: ObservationSequence, actions: ActionSequence) -> PolicyStats:
+        raise NotImplementedError
+
     def _optimal_policy_rec(self, observations: ObservationSequence, actions: ActionSequence,
                             state_probs: jnp.ndarray, _seen_observations: dict[ObservationSequence, ActionSequence] | None = None,
                             _eps: float = 1e-10) -> tuple[PolicyDict, PolicyStats]:
         """Given a sequence of (observation, action, observation, action, ..., observation), and the hidden state probabilities,
-        returns the optimal policy for this subtree, and the statistics (in particular EV and G)."""
+        returns the optimal policy for this subtree, and the statistics."""
         # print(f"{'  ' * len(observations)}Exploring observations {observations} and actions {actions}")
 
         assert len(observations) == len(actions)
@@ -42,7 +49,7 @@ class EVAgentDirect(BranchingAgent):
             state_probs.shape} does not match expected {self.num_states}"
 
         # Overall policy and the policy and stats of each action
-        stats = {"EV": 0.0, "G": 0.0, "nodes": 0}
+        stats = copy.deepcopy(self.DEFAULT_STATS)
         policy = {}
 
         # Compute the probabilities of *all* next observations in the current state
@@ -77,17 +84,13 @@ class EVAgentDirect(BranchingAgent):
             state_probs2 = state_probs2 / np.sum(state_probs2)
 
             # Account for the reward of that observation
-            for i in range(self.num_modalities):
-                dG = -self.C[i][o[i]] * oprob
-                stats["G"] += dG
-                stats["EV"] -= dG
-            stats["nodes"] += 1
+            stats = sum_dicts([stats, self._stats_update_on_observation(
+                state_probs2, observations2, actions)], w=[1.0, oprob], no_w_keys=self.STAT_SUM_KEYS)
 
             if len(observations2) > self.time_horizon:
                 continue
 
             a_stats = {}
-            a_policies = {}
             # iterate over the next action
             for a in self.possible_actions:
                 # Select part of B_agg matching the selected action (indexing on the _last_ dimensions of B_agg)
@@ -102,17 +105,19 @@ class EVAgentDirect(BranchingAgent):
                 rec_policy, rec_stats = self._optimal_policy_rec(
                     observations2, actions2, state_probs3, _seen_observations=_seen_observations, _eps=_eps)
                 # Collect the policy and update the stats
-                a_policies[a] = rec_policy
+                # Assert that no keys in rec_policy are in policy
+                assert not any(k in policy for k in rec_policy)
+                policy.update(rec_policy)
                 a_stats[a] = rec_stats
 
             # Select the action and therefore also policy for this observation
-            best_a = min(a_stats, key=lambda a: a_stats[a]["G"])
-            policy.update(a_policies[best_a])
-            new_pol = np.zeros(self.num_controls)
-            new_pol[*best_a] = 1.0
+            new_pol = self._select_policy_for_observation(
+                state_probs2, observations2, actions, policy, a_stats)
             policy[observations2] = new_pol
-            stats = sum_dicts([stats, a_stats[best_a]], w=[
-                              1.0, oprob], no_w_keys=["nodes"])
+            new_stats = sum_dicts([a_stats[a] for a in self.possible_actions],
+                                  [new_pol[*a] for a in self.possible_actions], no_w_keys=self.STAT_SUM_KEYS)
+            stats = sum_dicts([stats, new_stats], [1.0, oprob],
+                              no_w_keys=self.STAT_SUM_KEYS)
 
         # # Leaf observation had no actions
         # if len(observations2) > self.time_horizon:
@@ -124,3 +129,25 @@ class EVAgentDirect(BranchingAgent):
         # policy = a_policies[best_a]
         # print(f"{'  ' * len(observations)}.. selected {best_a}: {np.array_str(new_pol, max_line_width=100).replace('\n', ' ')}, returning {stats}")
         return policy, stats
+
+    def _select_policy_for_observation(self, state_probs: np.ndarray, observations: ObservationSequence, actions: ActionSequence,
+                                       policy: PolicyDict, action_stats: dict[Action, PolicyStats]) -> ActionDistribution:
+        raise NotImplementedError
+
+
+class EVAgentDirect(AgentDirectBase):
+    """Agent minimizing expected value of the reward (sum over all the timesteps)"""
+
+    DEFAULT_STATS = {"G": 0.0, "EV": 0.0, "nodes": 0}
+
+    def _stats_update_on_observation(self, state_probs: np.ndarray, observations: ObservationSequence, actions: ActionSequence) -> PolicyStats:
+        G = sum(-self.C[i][observations[-1][i]]
+                for i in range(self.num_modalities))
+        return {"G": G, "EV": -G, "nodes": 1}
+
+    def _select_policy_for_observation(self, state_probs: np.ndarray, observations: ObservationSequence, actions: ActionSequence,
+                                       action_policies: dict[Action, PolicyDict], action_stats: dict[Action, PolicyStats]) -> ActionDistribution:
+        best_a = min(action_stats, key=lambda a: action_stats[a]["G"])
+        new_pol = np.zeros(self.num_controls)
+        new_pol[*best_a] = 1.0
+        return new_pol
