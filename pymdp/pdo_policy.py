@@ -3,9 +3,9 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 
-_Observation = tuple[int]
-_ObservationSequence = tuple[_Observation]
-_Action = tuple[int]
+_Observation = tuple[int, ...]
+_ObservationSequence = tuple[_Observation, ...]
+_Action = tuple[int, ...]
 _Policy = np.ndarray[np.float64]
 
 
@@ -23,7 +23,7 @@ class PDOPolicyBase:
             self.action_counts = action_counts
             self.action_names = [
                 [f"A{n}-{i}" for i in range(n)] for n in action_counts]
-        assert self.action_counts == [
+        assert list(self.action_counts) == [
             len(a) for a in self.action_names], "action_counts must match action_names"
 
     def policy_for_observations(self, observations: _ObservationSequence) -> _Policy:
@@ -53,8 +53,14 @@ class TabularPolicy(PDOPolicyBase):
     """A TabularPolicy is a policy that is a table of probabilities for each action given a sequence of observations"""
     def __init__(self, *, action_counts: list[int] | None = None, action_names: list[list[str]] | None = None,
                  observation_sequences: list[_ObservationSequence], table: np.ndarray | jnp.ndarray | None = None):
+        if action_counts is None and table is not None:
+            action_counts = table.shape[1:]
         super().__init__(action_counts=action_counts, action_names=action_names)
 
+        assert len(observation_sequences) == len(
+            set(observation_sequences)), "Observation sequences must be unique"
+
+        # convert observation sequences to tuples of tuples
         self.observation_sequences = tuple(
             tuple(tuple(observation) for observation in observation_seq) for observation_seq in observation_sequences)
 
@@ -64,6 +70,7 @@ class TabularPolicy(PDOPolicyBase):
         self.table = table
         if self.table is None:
             self.table = self._gen_default_table()
+        assert len(observation_sequences) == self.table.shape[0], "Number of observation sequences must match table shape"
 
     def _gen_default_table(self) -> np.ndarray | jnp.ndarray:
         return jnp.ones(shape=(len(self.observation_sequences), *self.action_counts), dtype=jnp.float32) / self.n_actions
@@ -78,6 +85,13 @@ class TabularPolicy(PDOPolicyBase):
         return TabularPolicy(action_counts=self.action_counts, action_names=self.action_names,
                              observation_sequences=self.observation_sequences, table=new_table)
 
+    @classmethod
+    def from_dict(cls, policy_dict: dict[_ObservationSequence, _Action], action_names: list[list[str]] | None = None) -> "TabularPolicy":
+        observation_sequences = sorted(policy_dict.keys())
+        action_counts = policy_dict[observation_sequences[0]].shape
+        print(action_counts)
+        table = np.stack([policy_dict[obs] for obs in observation_sequences])
+        return cls(action_counts=action_counts, action_names=action_names, observation_sequences=observation_sequences, table=table)
 
 class TabularSoftmaxPolicy(TabularPolicy):
     """The softmax policy is a TabularPolicy with a softmax applied to the actions"""
