@@ -11,7 +11,7 @@ import copy
 import numpy as np
 import jax.numpy as jnp
 
-from .common import Action, ActionDistribution, ActionSequence, ObservationSequence, PolicyStats, PolicyDict, outer_product, sum_dicts
+from .common import Action, ActionDistribution, ActionSequence, Observation, ObservationSequence, PolicyStats, PolicyDict, outer_product, sum_dicts
 from .agent_base import BranchingAgent
 from .full_policy import TabularPolicy
 
@@ -36,8 +36,8 @@ class AgentDirectBase(BranchingAgent):
     def _optimal_policy_rec(self, observations: ObservationSequence, actions: ActionSequence,
                             state_probs: jnp.ndarray, _seen_observations: dict[ObservationSequence, ActionSequence] | None = None,
                             _eps: float = 1e-10) -> tuple[PolicyDict, PolicyStats]:
-        """Given a sequence of (observation, action, observation, action, ..., observation), and the hidden state probabilities,
-        returns the optimal policy for this subtree, and the statistics."""
+        """Given a sequence of (observation, action, ..., observation, action), and the hidden state probabilities
+        (with the action already counted in), returns the optimal policy for this subtree, and the statistics."""
         # print(f"{'  ' * len(observations)}Exploring observations {observations} and actions {actions}")
 
         assert len(observations) == len(actions)
@@ -111,27 +111,17 @@ class AgentDirectBase(BranchingAgent):
                 a_stats[a] = rec_stats
 
             # Select the action and therefore also policy for this observation
-            new_pol = self._select_policy_for_observation(
-                state_probs2, observations2, actions, policy, a_stats)
+            new_pol, new_stats = self._policy_and_stats_for_observation(
+                state_probs2, state_probs, observations2, actions, policy, a_stats)
             policy[observations2] = new_pol
-            new_stats = sum_dicts([a_stats[a] for a in self.possible_actions],
-                                  [new_pol[*a] for a in self.possible_actions], no_w_keys=self.STAT_SUM_KEYS)
             stats = sum_dicts([stats, new_stats], [1.0, oprob],
                               no_w_keys=self.STAT_SUM_KEYS)
 
-        # # Leaf observation had no actions
-        # if len(observations2) > self.time_horizon:
-        #     print(f"{'  ' * len(observations)}.. returning {stats}")
-        #     return {}, stats
-
-        # Select the best action
-        # print(a_stats)
-        # policy = a_policies[best_a]
-        # print(f"{'  ' * len(observations)}.. selected {best_a}: {np.array_str(new_pol, max_line_width=100).replace('\n', ' ')}, returning {stats}")
         return policy, stats
 
-    def _select_policy_for_observation(self, state_probs: np.ndarray, observations: ObservationSequence, actions: ActionSequence,
-                                       policy: PolicyDict, action_stats: dict[Action, PolicyStats]) -> ActionDistribution:
+    def _policy_and_stats_for_observation(self, state_probs: np.ndarray, prev_state_probs: np.ndarray,
+                                          observations: ObservationSequence, prev_actions: ActionSequence,
+                                          policy: PolicyDict, action_stats: dict[Action, PolicyStats]) -> tuple[ActionDistribution, PolicyStats]:
         raise NotImplementedError
 
 
@@ -145,9 +135,50 @@ class EVAgentDirect(AgentDirectBase):
                 for i in range(self.num_modalities))
         return {"G": G, "EV": -G, "nodes": 1}
 
-    def _select_policy_for_observation(self, state_probs: np.ndarray, observations: ObservationSequence, actions: ActionSequence,
-                                       action_policies: dict[Action, PolicyDict], action_stats: dict[Action, PolicyStats]) -> ActionDistribution:
+    def _policy_and_stats_for_observation(self, state_probs: np.ndarray, prev_state_probs: np.ndarray,
+                                          observations: ObservationSequence, prev_actions: ActionSequence,
+                                          policy: PolicyDict, action_stats: dict[Action, PolicyStats]) -> tuple[ActionDistribution, PolicyStats]:
         best_a = min(action_stats, key=lambda a: action_stats[a]["G"])
         new_pol = np.zeros(self.num_controls)
         new_pol[*best_a] = 1.0
-        return new_pol
+        new_stats = sum_dicts([action_stats[a] for a in self.possible_actions],
+                              [new_pol[*a] for a in self.possible_actions], no_w_keys=self.STAT_SUM_KEYS)
+        return new_pol, new_stats
+
+
+class PDOAgentDirect(AgentDirectBase):
+    """Agent minimizing PDO"""
+
+    DEFAULT_STATS = {"G": 0.0, "EV": 0.0, "policy_KL": 0.0, "nodes": 0}
+
+    def _log_p_tilde(self, prev_actions: ActionSequence, state_probs: np.ndarray, observations: ObservationSequence) -> float:
+        """Compute $\\log\\tilde{P}(a_{t-1}, s_t, o_t | a_{0:t-2}, s_{t-1}, o_{0:t-1})$.
+        Note that `prev_actions` is ampty for the first observation (though that is usually ignored as the agent has no control over it).
+        """
+        # Compute $\log\tilde{P}(...)$
+        return self.beta * sum(-self.C[i][observations[-1][i]] for i in range(self.num_modalities))
+
+    def _stats_update_on_observation(self, state_probs: np.ndarray, observations: ObservationSequence, actions: ActionSequence) -> PolicyStats:
+        r = copy.deepcopy(self.DEFAULT_STATS)
+        r["G"] = self._log_p_tilde(actions, state_probs, observations)
+        r["EV"] = sum(self.C[i][observations[-1][i]]
+                      for i in range(self.num_modalities))
+        return r
+
+    def _policy_and_stats_for_observation(self, state_probs: np.ndarray, prev_state_probs: np.ndarray,
+                                          observations: ObservationSequence, prev_actions: ActionSequence,
+                                          policy: PolicyDict, action_stats: dict[Action, PolicyStats]) -> tuple[ActionDistribution, PolicyStats]:
+        # Now compute F's for all the actions
+        F = np.zeros(self.num_controls)
+        prior_policy = self.prior_policy.policy_for_observations(observations)
+        for a in self.possible_actions:
+            F[*a] = -np.log2(prior_policy[a]) + action_stats[a]["G"]
+        new_pol = np.exp2(-F)
+        new_pol = new_pol / np.sum(new_pol)
+        KL = np.sum(new_pol * (np.log2(new_pol) - np.log2(prior_policy)))
+
+        new_stats = sum_dicts([action_stats[a] for a in self.possible_actions],
+                              [new_pol[*a] for a in self.possible_actions], no_w_keys=self.STAT_SUM_KEYS)
+        new_stats["G"] += KL
+        new_stats["policy_KL"] += KL
+        return new_pol, new_stats

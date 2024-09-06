@@ -8,5 +8,5 @@ __author__: Tomáš Gavenčiak
 """
 
 from . import agent_base, agent_direct, agent_gradient, common
-from .agent_direct import EVAgentDirect
+from .agent_direct import EVAgentDirect, PDOAgentDirect
 from .agent_gradient import EVAgentGradient, PDOAgentGradient
