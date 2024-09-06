@@ -149,7 +149,7 @@ class EVAgentDirect(AgentDirectBase):
 class PDOAgentDirect(AgentDirectBase):
     """Agent minimizing PDO"""
 
-    DEFAULT_STATS = {"G": 0.0, "EV": 0.0, "policy_KL": 0.0, "nodes": 0}
+    DEFAULT_STATS = {"G": 0.0, "EV": 0.0, "policy_KL": 0.0, "state_H": 0.0, "nodes": 0}
 
     def _log_p_tilde(self, prev_actions: ActionSequence, state_probs: np.ndarray, observations: ObservationSequence) -> float:
         """Compute $\\log\\tilde{P}(a_{t-1}, s_t, o_t | a_{0:t-2}, s_{t-1}, o_{0:t-1})$.
@@ -163,6 +163,7 @@ class PDOAgentDirect(AgentDirectBase):
         r["G"] = self._log_p_tilde(actions, state_probs, observations)
         r["EV"] = sum(self.C[i][observations[-1][i]]
                       for i in range(self.num_modalities))
+        r["state_H"] = -np.sum(state_probs * np.log2(np.maximum(state_probs, 1e-20)))
         return r
 
     def _policy_and_stats_for_observation(self, state_probs: np.ndarray, prev_state_probs: np.ndarray,
