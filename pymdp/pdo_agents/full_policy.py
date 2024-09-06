@@ -97,7 +97,6 @@ class TabularPolicy(FullPolicyBase):
         assert cls is TabularPolicy, "This method must be called on TabularPolicy, not its subclass"
         observation_sequences = sorted(policy_dict.keys())
         action_counts = policy_dict[observation_sequences[0]].shape
-        print(action_counts)
         table = np.stack([policy_dict[obs] for obs in observation_sequences])
         return cls(action_counts=action_counts, action_names=action_names, observation_sequences=observation_sequences, table=table)
 
