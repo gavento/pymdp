@@ -24,18 +24,19 @@ class BranchingAgent(Agent):
     The agent only runs inference on the first time it is called, then just follows the policy it inferred.
     """
 
-    def __init__(self, A, B, time_horizon, env: Env, policy_iterations: int, policy_lr=0.01,
-                 prior_policy: FullPolicyBase = None, beta=1.0, progress=True, **kwargs):
+    def __init__(self, A, B, time_horizon, env: Env, policy_iterations: int | None = None, policy_lr=0.01,
+                 prior_policy: FullPolicyBase | None = None, beta=1.0, progress=True, **kwargs):
         super(BranchingAgent, self).__init__(A, B, **kwargs)
         self.policy = None
         self.action = None
         self.time_horizon = time_horizon
         self.policy_iterations = policy_iterations
         self.policy_lr = policy_lr
-        self.prior_policy = UniformPolicy(action_counts=self.num_controls)
+        self.prior_policy = prior_policy
+        if self.prior_policy is None:
+            self.prior_policy = UniformPolicy(action_counts=self.num_controls)
         self.env = env
         self.progress = progress
-        self.prior_policy = prior_policy
         self.beta = beta
 
         # Possible observations for each turn:
