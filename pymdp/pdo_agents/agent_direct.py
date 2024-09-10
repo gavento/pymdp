@@ -163,7 +163,9 @@ class PDOAgentDirect(AgentDirectBase):
         r["G"] = self._log_p_tilde(actions, state_probs, observations)
         r["EV"] = sum(self.C[i][observations[-1][i]]
                       for i in range(self.num_modalities))
-        r["state_H"] = -np.sum(state_probs * np.log2(np.maximum(state_probs, 1e-20)))
+        sH = np.zeros(self.time_horizon+1)
+        sH[len(observations) - 1] = -np.sum(state_probs * np.log2(np.maximum(state_probs, 1e-20)))
+        r[f"state_H"] += sH
         return r
 
     def _policy_and_stats_for_observation(self, state_probs: np.ndarray, prev_state_probs: np.ndarray,
