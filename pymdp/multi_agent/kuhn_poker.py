@@ -339,14 +339,15 @@ class KuhnPokerEnv(Env):
         # Fill in A_cards
         for hand_idx in range(self.num_hands):
             for history_idx in range(self.num_action_histories):
-                    card_idx = self._card_to_idx(self._idx_to_hand(hand_idx)[0])
-                    A_cards[card_idx, hand_idx, history_idx] = 1.0
+                card_idx = self._card_to_idx(self._idx_to_hand(hand_idx)[0])
+                A_cards[card_idx, hand_idx, history_idx] = 1.0
                     # if hand < 2:  # JQ, JK
                     #     A_cards[0, hand, history] = 1.0  # J
                     # elif hand < 4:  # QJ, QK
                     #     A_cards[1, hand, history] = 1.0  # Q
                     # else:  # KJ, KQ
                     #     A_cards[2, hand, history] = 1.0  # K
+                
                 # figure out what the last action was for this history
                 last_action = self._prev_action_to_idx(self._idx_to_hist(history_idx)[-1])
                 A_actions[last_action, hand_idx, history_idx] = 1.0
@@ -363,9 +364,9 @@ class KuhnPokerEnv(Env):
                 #     last_action = 4
 
 
-                # figure out the reward for this history
+                # figure out the rewards for this history
                 terminal_histories = [3, 5, 6, 7, 8]
-                if history in terminal_histories:
+                if history_idx in terminal_histories:
                     
 
     def _construct_transition_dist(self):
