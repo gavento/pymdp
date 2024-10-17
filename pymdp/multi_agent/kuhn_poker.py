@@ -9,9 +9,16 @@ class KuhnPokerEnv(Env):
         self.pot = 0
         self.action_history = []
         self.turn = 0
+        self.num_hands = 6
+        self.num_cards = 3
+        self.num_action_histories = 9
+        self.num_prev_actions = 5
+        self.num_rewards = 4
         self.reset()
         self._transition_dist = self._construct_transition_dist()
         self._likelihood_dist = self._construct_likelihood_dist()
+        # self._hist_idx_dict = self._construct_hist_idx_dict()
+        # self._prev_action_idx_dict = self._construct_prev_action_idx_dict()
     
     def reset(self, state=None):
         """
@@ -48,6 +55,7 @@ class KuhnPokerEnv(Env):
         reward = 0
         
         if self.turn == 0:  # Player 1's turn
+            self.pot = 2 # both players ante 1
             if action == 'bet':
                 self.pot += 1  # Player 1 adds to the pot
             elif action == 'check':
@@ -122,6 +130,161 @@ class KuhnPokerEnv(Env):
         elif folding_player == 1:
             return self.pot  # Player 2 folds, Player 1 wins
     
+    def _construct_hist_idx_dict(self):
+        """
+        Constructs a dictionary mapping action histories to their corresponding indices.
+        """
+        hist_idx_dict = {}
+        i = 0
+        for hist in enumerate(self._idx_to_hist(range(9))):
+            hist_idx_dict[i] = hist
+            i += 1
+        print(hist_idx_dict)
+        return hist_idx_dict
+
+    def _construct_prev_action_idx_dict(self):
+        """
+        Constructs a dictionary mapping previous actions to their corresponding indices.
+        """
+        prev_action_idx_dict = {}
+        i = 0
+        for prev_action in enumerate(self._idx_to_prev_action(range(5))):
+            prev_action_idx_dict[i] = prev_action
+            i += 1
+        print(prev_action_idx_dict)
+        return prev_action_idx_dict
+    
+    def _hist_to_idx(self, history):
+        """
+        Converts the action history to its corresponding index.
+        """
+        if history == []:
+            return 0
+        elif history == ['check']:
+            return 1
+        elif history == ['bet']:
+            return 2
+        elif history == ['check', 'check']:
+            return 3        
+        elif history == ['check', 'bet']:
+            return 4
+        elif history == ['bet', 'fold']:
+            return 5
+        elif history == ['bet', 'call']:
+            return 6
+        elif history == ['check', 'bet', 'fold']:
+            return 7
+        elif history == ['check', 'bet', 'call']:
+            return 8
+    
+    def _idx_to_hist(self, idx):
+        """
+        Converts the index of an action history to its corresponding array representation.
+        """
+        if idx == 0:
+            return []
+        elif idx == 1:
+            return ['check']
+        elif idx == 2:
+            return ['bet']
+        elif idx == 3:
+            return ['check', 'check']
+        elif idx == 4:
+            return ['check', 'bet']
+        elif idx == 5:
+            return ['bet', 'fold']
+        elif idx == 6:
+            return ['bet', 'call']
+        elif idx == 7:
+            return ['check', 'bet', 'fold']
+        elif idx == 8:
+            return ['check', 'bet', 'call']
+
+    def _idx_to_prev_action(self, idx):
+        """
+        Converts the index of an action to its corresponding string representation.
+        """
+        if idx == 0:
+            return None
+        elif idx == 1:
+            return 'check'
+        elif idx == 2:
+            return 'bet'
+        elif idx == 3:
+            return 'call'
+        elif idx == 4:
+            return 'fold'
+    
+    def _prev_action_to_idx(self, prev_action):
+        """
+        Converts the string representation of a previous action to its corresponding index.
+        """
+        if prev_action is None:
+            return 0
+        elif prev_action == 'check':
+            return 1
+        elif prev_action == 'bet':
+            return 2
+        elif prev_action == 'call':
+            return 3
+        elif prev_action == 'fold':
+            return 4    
+
+    def _hand_to_idx(self, hand):
+        """
+        Converts the hand to its corresponding index.
+        """
+        if hand == ['J', 'Q']:
+            return 0
+        elif hand == ['J', 'K']:
+            return 1
+        elif hand == ['Q', 'J']:
+            return 2
+        elif hand == ['Q', 'K']:
+            return 3
+        elif hand == ['K', 'J']:
+            return 4
+        elif hand == ['K', 'Q']:
+            return 5
+    
+    def _idx_to_hand(self, idx):
+        """
+        Converts the index of a hand to its corresponding array representation.
+        """
+        if idx == 0:
+            return ['J', 'Q']
+        elif idx == 1:
+            return ['J', 'K']
+        elif idx == 2:
+            return ['Q', 'J']
+        elif idx == 3:
+            return ['Q', 'K']
+        elif idx == 4:
+            return ['K', 'J']
+        elif idx == 5:
+            return ['K', 'Q']
+
+    def _card_to_idx(self, card):
+        """
+        Converts the card to its corresponding index.
+        """
+        if card == 'J':
+            return 0
+        elif card == 'Q':
+            return 1
+        elif card == 'K':
+            return 2
+
+    def _idx_to_card(self, idx):
+        """
+        Converts the index of a card to its corresponding array representation.
+        """
+        if idx == 0:
+            return 'J'
+        elif idx == 1:
+            return 'Q'
+        elif idx == 2:
+            return 'K'
     def render(self):
         """
         Rendering function to display the current state of the game.
@@ -149,51 +312,76 @@ class KuhnPokerEnv(Env):
     def get_transition_dist(self):
         return self._transition_dist
 
-    def _construct_likelihood_dist(self):
+    def _construct_likelihood_dist(self, player_idx):
         """ Returns the likelihood distribution A for the Kuhn Poker game. """
-        print("test")
         # Define the number of states and observations
-        num_hands = 6  # JQ, JK, QJ, QK, KJ, KQ
-        num_action_histories = 7  # [], [check], [bet], [check, check], [check, bet], [check, bet, fold], [check, bet, call]
-        num_cards = 3  # J, Q, K
-        num_prev_actions = 3  # None, Check/Call, Bet/Fold
+        # num_hands = 6  # JQ, JK, QJ, QK, KJ, KQ
+        # num_action_histories = 9  # [], [check], [bet], [check, check], [check, bet], [bet, fold], [bet, call], [check, bet, fold], [check, bet, call]
+        # num_cards = 3  # J, Q, K
+        # num_prev_actions = 5  # None, Check, Bet, Call, Fold
+        # num_rewards = 4 # -2, -1, 1, 2 - how much each player wins or loses on net
 
+        # state: (hands, action history). observation: (card, previous action)
+        # p(o_cards | hidden states) and p(o_actions | hidden states) and p(o_rewards | hidden states)
+        # 3 outcome modalities - diff elements of a list
+        # create collection of 2 A matrices - one for cards and one for actions - each A matrix is representing the likelihood over that modality
+        # leading dimension of matrices stores the support of the distribution - A_0: 3 rows, A_1: 3 rows
+        # currently assuming posterior over hands and action histories are independent - we don't want this
+        # use a single hidden state factor to represent both hands and action histories
+        # could fill out like below and then reshape at the end
+        # A lagging dim to be 54 for both cards and actions
+        # for each column in one of the A matrices, fill out the probabilities
+        
         # Initialize the likelihood distribution A
-        A = np.zeros((num_cards, num_prev_actions, num_hands, num_action_histories))
+        A_cards = np.zeros((self.num_cards, self.num_hands, self.num_action_histories))
+        A_actions = np.zeros((self.num_prev_actions, self.num_hands, self.num_action_histories))
+        A_rewards = np.zeros((self.num_rewards, self.num_hands, self.num_action_histories))
+        # Fill in A_cards
+        for hand_idx in range(self.num_hands):
+            for history_idx in range(self.num_action_histories):
+                    card_idx = self._card_to_idx(self._idx_to_hand(hand_idx)[0])
+                    A_cards[card_idx, hand_idx, history_idx] = 1.0
+                    # if hand < 2:  # JQ, JK
+                    #     A_cards[0, hand, history] = 1.0  # J
+                    # elif hand < 4:  # QJ, QK
+                    #     A_cards[1, hand, history] = 1.0  # Q
+                    # else:  # KJ, KQ
+                    #     A_cards[2, hand, history] = 1.0  # K
+                # figure out what the last action was for this history
+                last_action = self._prev_action_to_idx(self._idx_to_hist(history_idx)[-1])
+                A_actions[last_action, hand_idx, history_idx] = 1.0
 
-        # Set the likelihoods for each player's observations
-        for hand in range(num_hands):
-            for history in range(num_action_histories):
-                # Player's card observation
-                if hand < 2:  # JQ, JK
-                    A[0, :, hand, history] = 1.0  # Player sees J
-                elif hand < 4:  # QJ, QK
-                    A[1, :, hand, history] = 1.0  # Player sees Q
-                else:  # KJ, KQ
-                    A[2, :, hand, history] = 1.0  # Player sees K
+                # if history == 0: # None
+                #     last_action = 0
+                # elif history == 1 or history == 3: # Check
+                #     last_action = 1
+                # elif history == 2 or history == 4: # Bet
+                #     last_action = 2
+                # elif history == 5 or history == 7: # Fold
+                #     last_action = 3
+                # elif history == 6 or history == 8: # Call
+                #     last_action = 4
 
-                # Previous action observation
-                if history == 0:  # []
-                    A[:, 0, hand, history] = 1.0  # No previous action
-                elif history in [1, 3]:  # [check], [check, check]
-                    A[:, 1, hand, history] = 1.0  # Previous action was Check
-                elif history in [2, 4, 5, 6]:  # [bet], [check, bet], [check, bet, fold], [check, bet, call]
-                    A[:, 2, hand, history] = 1.0  # Previous action was Bet
 
-        return A
+                # figure out the reward for this history
+                terminal_histories = [3, 5, 6, 7, 8]
+                if history in terminal_histories:
+                    
 
     def _construct_transition_dist(self):
-        print("test")
         """ Returns the transition distribution B for the Kuhn Poker game. """
         # States: (hand, action history)
         # Transition: (hand, action history) -> (hand, (action_history, next action))
         # Define the number of states and actions
-        num_hands =  6 # JQ, JK, QJ, QK, KJ, KQ
-        num_action_histories = 7  # [], [check], [bet], [check, check], [check, bet], [check, bet, fold], [check, bet, call]
-        num_actions = 2  # check/call, bet/fold
+        # num_hands =  6 # JQ, JK, QJ, QK, KJ, KQ
+        # num_action_histories = 7  # [], [check], [bet], [check, check], [check, bet], [check, bet, fold], [check, bet, call]
+        # num_actions = 2  # check/call, bet/fold
+
+        # single tensor whose rows and columns are 42, 3rd dim is number of actions - 42 x 42 x 2
+        # create dict for hand,action history -> index
 
         # Initialize the transition distribution B
-        B = np.zeros((num_hands, num_action_histories, num_actions, num_hands, num_action_histories))
+        B = np.zeros((self.num_hands, self.num_action_histories, self.num_actions, self.num_hands, self.num_action_histories))
 
         # The hands don't change during the game, so we'll set those transitions to 1
         for h in range(num_hands):
