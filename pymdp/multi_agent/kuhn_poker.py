@@ -386,7 +386,7 @@ class KuhnPokerEnv(Env):
         # num_action_histories = 9  # [], [check], [bet], [check, check], [check, bet], [bet, fold], [bet, call], [check, bet, fold], [check, bet, call]
         # num_actions = 4  # Check, Bet, Call, Fold
 
-        # single tensor whose rows and columns are 42, 3rd dim is number of actions - 42 x 42 x 4
+        # single tensor whose rows and columns are 54, 3rd dim is number of actions - 54 x 54 x 4
         # Initialize the transition distribution B
         B = np.zeros((self.num_hands * self.num_action_histories, self.num_hands * self.num_action_histories, self.num_prev_actions))
 
