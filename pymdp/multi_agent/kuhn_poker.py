@@ -13,7 +13,8 @@ class KuhnPokerEnv(Env):
         self.num_cards = 3
         self.num_action_histories = 9
         self.num_prev_actions = 5
-        self.num_rewards = 4
+        self.num_actions = 4
+        self.num_rewards = 5
         self.reset()
         self._transition_dist = self._construct_transition_dist()
         self._likelihood_dist = self._construct_likelihood_dist()
@@ -55,7 +56,7 @@ class KuhnPokerEnv(Env):
         reward = 0
         
         if self.turn == 0:  # Player 1's turn
-            self.pot = 2 # both players ante 1
+            self.pot = 0 # both players ante 1 but net is 0
             if action == 'bet':
                 self.pot += 1  # Player 1 adds to the pot
             elif action == 'check':
@@ -69,14 +70,14 @@ class KuhnPokerEnv(Env):
                 elif action == 'call':
                     self.pot += 1
                     done = True
-                    reward = self._resolve_game()
+                    reward = self._resolve_game(0)
             elif last_action == 'check':
                 if action == 'bet':
                     self.pot += 1
                     self.turn == 2
                 elif action == 'check':
                     done = True
-                    reward = self._resolve_game()
+                    reward = self._resolve_game(0)
             # if action == 'bet':
             #     self.pot += 1
             # elif action == 'check':
@@ -91,7 +92,7 @@ class KuhnPokerEnv(Env):
             elif action == 'call':
                 self.pot += 1
                 done = True
-                reward = self._resolve_game()
+                reward = self._resolve_game(0)
         # Observation: what the current player sees
         observation = self._get_observation()
         
@@ -110,16 +111,24 @@ class KuhnPokerEnv(Env):
         else:  # After the game ends, both players observe rewards
             return {'hands': self.player_hands, 'actions': self.action_history}
     
-    def _resolve_game(self):
+    def _resolve_game(self, player_idx):
         """
         Resolves the game after a showdown and determines the winner.
         """
         # Compare hands: King > Queen > Jack
         rank = {'K': 3, 'Q': 2, 'J': 1}
         if rank[self.player_hands[0]] > rank[self.player_hands[1]]:
-            return self.pot  # Player 1 wins
+            # Player 1 wins
+            if player_idx == 0:
+                return self.pot
+            else:
+                return -self.pot
         else:
-            return -self.pot  # Player 2 wins
+            # Player 2 wins
+            if player_idx == 0:
+                return -self.pot
+            else:
+                return self.pot
     
     def _resolve_fold(self, folding_player):
         """
@@ -129,30 +138,6 @@ class KuhnPokerEnv(Env):
             return -self.pot  # Player 1 folds, Player 2 wins
         elif folding_player == 1:
             return self.pot  # Player 2 folds, Player 1 wins
-    
-    def _construct_hist_idx_dict(self):
-        """
-        Constructs a dictionary mapping action histories to their corresponding indices.
-        """
-        hist_idx_dict = {}
-        i = 0
-        for hist in enumerate(self._idx_to_hist(range(9))):
-            hist_idx_dict[i] = hist
-            i += 1
-        print(hist_idx_dict)
-        return hist_idx_dict
-
-    def _construct_prev_action_idx_dict(self):
-        """
-        Constructs a dictionary mapping previous actions to their corresponding indices.
-        """
-        prev_action_idx_dict = {}
-        i = 0
-        for prev_action in enumerate(self._idx_to_prev_action(range(5))):
-            prev_action_idx_dict[i] = prev_action
-            i += 1
-        print(prev_action_idx_dict)
-        return prev_action_idx_dict
     
     def _hist_to_idx(self, history):
         """
@@ -285,6 +270,22 @@ class KuhnPokerEnv(Env):
             return 'Q'
         elif idx == 2:
             return 'K'
+
+    def _reward_to_idx(self, reward):
+        """
+        Converts the reward to its corresponding index.
+        """
+        if reward == -2:
+            return 0
+        elif reward == -1:
+            return 1
+        elif reward == 0:
+            return 2
+        elif reward == 1:
+            return 3
+        elif reward == 2:
+            return 4
+
     def render(self):
         """
         Rendering function to display the current state of the game.
@@ -318,8 +319,8 @@ class KuhnPokerEnv(Env):
         # num_hands = 6  # JQ, JK, QJ, QK, KJ, KQ
         # num_action_histories = 9  # [], [check], [bet], [check, check], [check, bet], [bet, fold], [bet, call], [check, bet, fold], [check, bet, call]
         # num_cards = 3  # J, Q, K
-        # num_prev_actions = 5  # None, Check, Bet, Call, Fold
-        # num_rewards = 4 # -2, -1, 1, 2 - how much each player wins or loses on net
+        # num_actions = 5  # None, Check, Bet, Call, Fold
+        # num_rewards = 4 # -2, -1, 0, 1, 2 - how much each player wins or loses on net. 0 is the null reward for all non-terminal states
 
         # state: (hands, action history). observation: (card, previous action)
         # p(o_cards | hidden states) and p(o_actions | hidden states) and p(o_rewards | hidden states)
@@ -334,7 +335,7 @@ class KuhnPokerEnv(Env):
         
         # Initialize the likelihood distribution A
         A_cards = np.zeros((self.num_cards, self.num_hands, self.num_action_histories))
-        A_actions = np.zeros((self.num_prev_actions, self.num_hands, self.num_action_histories))
+        A_actions = np.zeros((self.num_actions, self.num_hands, self.num_action_histories))
         A_rewards = np.zeros((self.num_rewards, self.num_hands, self.num_action_histories))
         # Fill in A_cards
         for hand_idx in range(self.num_hands):
@@ -352,22 +353,29 @@ class KuhnPokerEnv(Env):
                 last_action = self._prev_action_to_idx(self._idx_to_hist(history_idx)[-1])
                 A_actions[last_action, hand_idx, history_idx] = 1.0
 
-                # if history == 0: # None
-                #     last_action = 0
-                # elif history == 1 or history == 3: # Check
-                #     last_action = 1
-                # elif history == 2 or history == 4: # Bet
-                #     last_action = 2
-                # elif history == 5 or history == 7: # Fold
-                #     last_action = 3
-                # elif history == 6 or history == 8: # Call
-                #     last_action = 4
-
-
                 # figure out the rewards for this history
                 terminal_histories = [3, 5, 6, 7, 8]
                 if history_idx in terminal_histories:
-                    
+                    if history_idx == 5:
+                        # Player 2 folds
+                        reward = self._resolve_fold(1)
+                    elif history_idx == 7:
+                        # Player 1 folds
+                        reward = self._resolve_fold(0)
+                    else:
+                        reward = self._resolve_game(player_idx)
+                    A_rewards[self._reward_to_idx(reward), hand_idx, history_idx] = 1.0
+                else:
+                    # non-terminal history
+                    A_rewards[2, hand_idx, history_idx] = 1.0
+
+        # Combine last two dimensions of each A matrix into a single dimension
+        A_cards = A_cards.reshape(self.num_cards, self.num_hands * self.num_action_histories)
+        A_actions = A_actions.reshape(self.num_prev_actions, self.num_hands * self.num_action_histories)
+        A_rewards = A_rewards.reshape(self.num_rewards, self.num_hands * self.num_action_histories)
+        # combine A_cards, A_actions, A_rewards into a single tensor, where the first index is the modality
+        A = np.stack((A_cards, A_actions, A_rewards))
+        return A
 
     def _construct_transition_dist(self):
         """ Returns the transition distribution B for the Kuhn Poker game. """
@@ -375,40 +383,33 @@ class KuhnPokerEnv(Env):
         # Transition: (hand, action history) -> (hand, (action_history, next action))
         # Define the number of states and actions
         # num_hands =  6 # JQ, JK, QJ, QK, KJ, KQ
-        # num_action_histories = 7  # [], [check], [bet], [check, check], [check, bet], [check, bet, fold], [check, bet, call]
-        # num_actions = 2  # check/call, bet/fold
+        # num_action_histories = 9  # [], [check], [bet], [check, check], [check, bet], [bet, fold], [bet, call], [check, bet, fold], [check, bet, call]
+        # num_actions = 4  # Check, Bet, Call, Fold
 
-        # single tensor whose rows and columns are 42, 3rd dim is number of actions - 42 x 42 x 2
-        # create dict for hand,action history -> index
-
+        # single tensor whose rows and columns are 42, 3rd dim is number of actions - 42 x 42 x 4
         # Initialize the transition distribution B
-        B = np.zeros((self.num_hands, self.num_action_histories, self.num_actions, self.num_hands, self.num_action_histories))
+        B = np.zeros((self.num_hands * self.num_action_histories, self.num_hands * self.num_action_histories, self.num_prev_actions))
 
-        # The hands don't change during the game, so we'll set those transitions to 1
-        for h in range(num_hands):
-            for ah in range(num_action_histories):
-                for a in range(num_actions):
-                    B[h, ah, a, h, :] = 1.0 / num_action_histories
+        # valid moves for each history
+        valid_moves = {0: [0, 1], 1: [0, 1], 2: [2, 3], 3: [], 4: [2, 3], 5: [], 6: [], 7: [], 8: [] }
 
-        # Now we need to set the transitions for the action histories
-        # We'll use a dictionary to map current histories to possible next histories
-        history_transitions = {
-            0: [1, 2],           # [] can transition to [check] or [bet]
-            1: [3, 4],           # [check] can transition to [check, check] or [check, bet]
-            2: [5, 6],           # [bet] can transition to [bet, fold] or [bet, call]
-            3: [],               # [check, check] is terminal
-            4: [5, 6],           # [check, bet] can transition to [check, bet, fold] or [check, bet, call]
-            5: [],               # [check, bet, fold] is terminal
-            6: []                # [check, bet, call] is terminal
-        }
-
-        # Set the transitions based on the history_transitions dictionary
-        for h in range(num_hands):
-            for ah in range(num_action_histories):
-                for a in range(num_actions):
-                    if history_transitions[ah]:
-                        B[h, ah, a, h, history_transitions[ah][a]] = 1.0
-
+        # Iterate through all possible states and actions
+        for hand_idx in range(self.num_hands):
+            for history_idx in range(self.num_action_histories):
+                for action_idx in range(self.num_actions):
+                    current_state = hand_idx * self.num_action_histories + history_idx
+                    current_history = self._idx_to_hist(history_idx)
+                    
+                    # Determine the next state based on the current state and action
+                    if action_idx in valid_moves[history_idx]:
+                        # figure out the index of the next history
+                        next_history = current_history + [self._idx_to_action(action_idx)]
+                        next_history_idx = self._hist_to_idx(next_history)
+                        next_state = hand_idx * self.num_action_histories + next_history_idx
+                        B[current_state, next_state, action_idx] = 1.0
+                    elif valid_moves[history_idx] == []:
+                        # terminal history - set self-loop
+                        B[current_state, current_state, action_idx] = 1.0
         return B
 
 class GeneralKuhnPokerEnv(Env):
