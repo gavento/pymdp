@@ -320,7 +320,7 @@ class KuhnPokerEnv(Env):
         # num_action_histories = 9  # [], [check], [bet], [check, check], [check, bet], [bet, fold], [bet, call], [check, bet, fold], [check, bet, call]
         # num_cards = 3  # J, Q, K
         # num_actions = 5  # None, Check, Bet, Call, Fold
-        # num_rewards = 4 # -2, -1, 0, 1, 2 - how much each player wins or loses on net. 0 is the null reward for all non-terminal states
+        # num_rewards = 5 # -2, -1, 0, 1, 2 - how much each player wins or loses on net. 0 is the null reward for all non-terminal states
 
         # state: (hands, action history). observation: (card, previous action)
         # p(o_cards | hidden states) and p(o_actions | hidden states) and p(o_rewards | hidden states)
@@ -335,7 +335,7 @@ class KuhnPokerEnv(Env):
         
         # Initialize the likelihood distribution A
         A_cards = np.zeros((self.num_cards, self.num_hands, self.num_action_histories))
-        A_actions = np.zeros((self.num_actions, self.num_hands, self.num_action_histories))
+        A_actions = np.zeros((self.num_prev_actions, self.num_hands, self.num_action_histories))
         A_rewards = np.zeros((self.num_rewards, self.num_hands, self.num_action_histories))
         # Fill in A_cards
         for hand_idx in range(self.num_hands):
