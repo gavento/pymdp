@@ -52,6 +52,9 @@ class TMazeEnv(Env):
 
         self._reward_condition = None
         self._state = None
+
+    def __repr__(self):
+        return f"TMazeEnv(reward_probs={self.reward_probs!r})"
     
     def reset(self, state=None):
         if state is None:
