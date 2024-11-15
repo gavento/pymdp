@@ -128,21 +128,28 @@ class AgentDirectBase(BranchingAgent):
 class EVAgentDirect(AgentDirectBase):
     """Agent minimizing expected value of the reward (sum over all the timesteps)"""
 
-    DEFAULT_STATS = {"G": 0.0, "EV": 0.0, "nodes": 0}
+    DEFAULT_STATS = {"G": 0.0, "EV": 0.0, "policy_KL": 0.0, "nodes": 0}
 
     def _stats_update_on_observation(self, state_probs: np.ndarray, observations: ObservationSequence, actions: ActionSequence) -> PolicyStats:
         G = sum(-self.C[i][observations[-1][i]]
                 for i in range(self.num_modalities))
-        return {"G": G, "EV": -G, "nodes": 1}
+        return {"G": G, "EV": -G, "nodes": 1, "policy_KL": 0.0}
 
     def _policy_and_stats_for_observation(self, state_probs: np.ndarray, prev_state_probs: np.ndarray,
                                           observations: ObservationSequence, prev_actions: ActionSequence,
                                           policy: PolicyDict, action_stats: dict[Action, PolicyStats]) -> tuple[ActionDistribution, PolicyStats]:
-        best_a = min(action_stats, key=lambda a: action_stats[a]["G"])
+        best_G = min(action_stats[a]["G"] for a in action_stats)
         new_pol = np.zeros(self.num_controls)
-        new_pol[*best_a] = 1.0
+        for a in action_stats:
+            if np.isclose(action_stats[a]["G"], best_G):
+                new_pol[*a] = 1.0
+        new_pol = new_pol / np.sum(new_pol)
+        
+        prior_policy = self.prior_policy.policy_for_observations(observations)
+        KL = np.sum(new_pol * (np.log2(np.maximum(new_pol, 1e-64)) - np.log2(prior_policy)))
         new_stats = sum_dicts([action_stats[a] for a in self.possible_actions],
                               [new_pol[*a] for a in self.possible_actions], no_w_keys=self.STAT_SUM_KEYS)
+        new_stats["policy_KL"] += KL
         return new_pol, new_stats
 
 
